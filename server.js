@@ -1,3 +1,4 @@
+// server.js
 import express from "express";
 import wppconnect from "@wppconnect-team/wppconnect";
 import { createClient } from "@supabase/supabase-js";
@@ -22,7 +23,7 @@ function generateTestCode() {
   return Math.floor(100000 + Math.random() * 900000).toString();
 }
 
-// --- Função para criar prompt para IA Groq ---
+// --- Função para criar prompt IA Groq ---
 function buildPrompt(clientData, userMessage) {
   return `
 Tu és o assistente virtual da empresa ${clientData.name}.
@@ -57,14 +58,14 @@ async function askGroq(prompt) {
   return response.data.choices[0].message.content;
 }
 
-// --- Iniciar WPPConnect sem Puppeteer/Chrome ---
+// --- Iniciar WPPConnect SEM Puppeteer/Chrome ---
 wppconnect.create({
   session: "bot-session",
   headless: true,
-  useChrome: false,          // ❌ não usa Chrome
+  useChrome: false,          // ❌ NUNCA usa Chrome
   authStrategy: "LOCAL",     // salva sessão local
-  catchQR: () => {},         // ignorar QR
-  catchLogin: (link) => {    // ✅ link de sessão
+  catchQR: () => {},         // ignorar QR no Render
+  catchLogin: (link) => {    // ✅ link de login gerado
     sessionLink = link;
     console.log("🔗 Link de login gerado:", link);
   },
@@ -77,7 +78,7 @@ wppconnect.create({
 
 // --- Função principal do bot ---
 async function startBot(client) {
-  console.log("🤖 Bot iniciado no número de teste");
+  console.log("🤖 Bot iniciado e pronto para receber mensagens");
 
   client.onMessage(async (message) => {
     if (!message.body) return;
@@ -170,4 +171,5 @@ app.get("/dashboard/:code", async (req, res) => {
 // --- Rota teste ---
 app.get("/", (req, res) => res.send("Servidor ativo 🚀"));
 
+// --- Iniciar servidor ---
 app.listen(PORT, () => console.log(`Servidor rodando na porta ${PORT}`));
