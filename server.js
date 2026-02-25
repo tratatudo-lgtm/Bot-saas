@@ -1,3 +1,4 @@
+import supabase from './supabase.js'
 import express from "express";
 import wppconnect from "@wppconnect-team/wppconnect";
 import { createClient } from "@supabase/supabase-js";
