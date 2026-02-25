@@ -1,19 +1,13 @@
-import supabase from './supabase.js'
+
 import express from "express";
 import wppconnect from "@wppconnect-team/wppconnect";
-import { createClient } from "@supabase/supabase-js";
+import supabase from './supabase.js';
 import axios from "axios";
 
 const app = express();
 app.use(express.json());
 
 const PORT = process.env.PORT || 3000;
-
-// --- Supabase ---
-const supabase = createClient(
-  process.env.SUPABASE_URL,  // tua Supabase URL
-  process.env.SUPABASE_KEY   // tua Supabase API KEY
-);
 
 // --- Variáveis ---
 let sessionLink = "";
@@ -58,27 +52,21 @@ async function askGroq(prompt) {
   return response.data.choices[0].message.content;
 }
 
-// --- Inicializa WPPConnect com login por link ---
+// --- Inicializa WPPConnect ---
 wppconnect.create({
   session: "bot-session",
   headless: true,
   useChrome: false,
   puppeteerOptions: { args: ["--no-sandbox", "--disable-setuid-sandbox"] },
   catchQR: (base64Qr) => {
-    // No Render, não usamos QR, só log
     console.log("⚠️ Primeiro login: use link de sessão");
   },
   authStrategy: "LOCAL",
   onStateChange: async (state) => {
     console.log("Estado da sessão:", state);
-    if (state === "CONNECTED") {
-      console.log("✅ Bot conectado sem QR Code!");
-    }
-    if (state === "SYNCING") {
-      console.log("🔄 Sincronizando histórico de mensagens...");
-    }
+    if (state === "CONNECTED") console.log("✅ Bot conectado sem QR Code!");
+    if (state === "SYNCING") console.log("🔄 Sincronizando histórico de mensagens...");
   },
-  // --- Opcional: criar link de login se for a primeira vez ---
   catchLogin: (link) => {
     sessionLink = link;
     console.log("🔗 Link de login gerado (primeira vez):", link);
@@ -103,14 +91,20 @@ async function startBot(client) {
       .single();
 
     if (clientData) {
-      // Salva número do cliente associado ao código
-      await supabase.from("clients")
-        .update({ phone: from, active_number: "teste" })
-        .eq("id", clientData.id);
+      const now = new Date();
+      const expiry = new Date(clientData.test_start);
+      expiry.setDate(expiry.getDate() + 3); // 3 dias de teste
+
+      if (!clientData.test_start || now > expiry) {
+        // Ativa o teste se não tiver sido iniciado
+        await supabase.from("clients")
+          .update({ test_start: now.toISOString(), active_number: "teste" })
+          .eq("id", clientData.id);
+      }
 
       await client.sendText(
         from,
-        `Código validado! Agora o bot do seu negócio está pronto para testar.\nSeu link da dashboard: https://<seu-app-render>.onrender.com/dashboard/${message.body}`
+        `Código validado! Teste ativo por 3 dias.\nDashboard: https://<seu-app-render>.onrender.com/dashboard/${message.body}`
       );
       return;
     }
@@ -134,7 +128,9 @@ async function startBot(client) {
             business_type: "Restaurante",
             language: "pt",
             test_code: code,
-            active_number: "teste"
+            active_number: "teste",
+            test_start: new Date().toISOString(),
+            plan: "Starter"
           }
         ])
         .select()
@@ -142,7 +138,7 @@ async function startBot(client) {
 
       await client.sendText(
         from,
-        `Bem-vindo ao teste do bot! Seu código de 6 dígitos é: ${code}\nUse-o para validar o seu teste e acessar sua dashboard: https://<seu-app-render>.onrender.com/dashboard/${code}`
+        `Bem-vindo ao teste do bot! Seu código de 6 dígitos é: ${code}\nDashboard: https://<seu-app-render>.onrender.com/dashboard/${code}`
       );
       return;
     }
@@ -162,7 +158,7 @@ async function startBot(client) {
   });
 }
 
-// --- Rota dashboard do cliente ---
+// --- Dashboard do cliente ---
 app.get("/dashboard/:code", async (req, res) => {
   const { code } = req.params;
 
@@ -180,10 +176,19 @@ app.get("/dashboard/:code", async (req, res) => {
     .eq("client_id", clientData.id)
     .order("created_at", { ascending: true });
 
-  res.json({ client: clientData, messages });
+  // --- Calcula estatísticas ---
+  const totalMessages = messages.length;
+  const totalConversations = new Set(messages.map(m => m.sender === "client" ? m.client_id : null)).size;
+
+  res.json({
+    client: clientData,
+    messages,
+    stats: { totalMessages, totalConversations }
+  });
 });
 
-// --- Rota teste simples ---
+// --- Rota teste ---
 app.get("/", (req, res) => res.send("Servidor ativo 🚀"));
 
+// --- Inicia servidor ---
 app.listen(PORT, () => console.log(`Servidor rodando na porta ${PORT}`));
