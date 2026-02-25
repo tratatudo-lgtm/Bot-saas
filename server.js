@@ -2,25 +2,27 @@ import express from "express";
 import wppconnect from "@wppconnect-team/wppconnect";
 import { createClient } from "@supabase/supabase-js";
 import axios from "axios";
-import crypto from "crypto";
 
 const app = express();
 app.use(express.json());
 
 const PORT = process.env.PORT || 3000;
 
-// Supabase
+// --- Supabase ---
 const supabase = createClient(
-  process.env.SUPABASE_URL,
-  process.env.SUPABASE_KEY
+  process.env.SUPABASE_URL,  // tua Supabase URL
+  process.env.SUPABASE_KEY   // tua Supabase API KEY
 );
 
-// Função para gerar códigos de teste (6 dígitos)
+// --- Variáveis ---
+let sessionLink = "";
+
+// --- Gera código de teste automático ---
 function generateTestCode() {
   return Math.floor(100000 + Math.random() * 900000).toString();
 }
 
-// Função para criar prompt para IA Groq
+// --- Cria prompt para IA Groq ---
 function buildPrompt(clientData, userMessage) {
   return `
 Tu és o assistente virtual da empresa ${clientData.name}.
@@ -37,7 +39,7 @@ Mensagem do cliente:
 `;
 }
 
-// Função para chamar IA Groq
+// --- Chamada IA Groq ---
 async function askGroq(prompt) {
   const response = await axios.post(
     "https://api.groq.com/openai/v1/chat/completions",
@@ -55,30 +57,44 @@ async function askGroq(prompt) {
   return response.data.choices[0].message.content;
 }
 
-// Inicializar WPPConnect
+// --- Inicializa WPPConnect com login por link ---
 wppconnect.create({
   session: "bot-session",
   headless: true,
   useChrome: false,
-  puppeteerOptions: {
-    args: ["--no-sandbox", "--disable-setuid-sandbox", "--disable-dev-shm-usage", "--disable-gpu"]
+  puppeteerOptions: { args: ["--no-sandbox", "--disable-setuid-sandbox"] },
+  catchQR: (base64Qr) => {
+    // No Render, não usamos QR, só log
+    console.log("⚠️ Primeiro login: use link de sessão");
+  },
+  authStrategy: "LOCAL",
+  onStateChange: async (state) => {
+    console.log("Estado da sessão:", state);
+    if (state === "CONNECTED") {
+      console.log("✅ Bot conectado sem QR Code!");
+    }
+    if (state === "SYNCING") {
+      console.log("🔄 Sincronizando histórico de mensagens...");
+    }
+  },
+  // --- Opcional: criar link de login se for a primeira vez ---
+  catchLogin: (link) => {
+    sessionLink = link;
+    console.log("🔗 Link de login gerado (primeira vez):", link);
   }
 })
-.then((client) => startBot(client))
-.catch((error) => console.error("Erro ao iniciar bot:", error));
+.then(client => startBot(client))
+.catch(err => console.error("Erro ao iniciar bot:", err));
 
+// --- Função principal do bot ---
 async function startBot(client) {
-  console.log("🤖 Bot iniciado");
+  console.log("🤖 Bot iniciado no número de teste");
 
-  // Ouvir mensagens recebidas
   client.onMessage(async (message) => {
     if (!message.body) return;
-
-    console.log("Mensagem recebida:", message.body);
-
     const from = message.from;
 
-    // Verifica se é código de teste
+    // --- Verifica se é código de teste enviado pelo cliente ---
     let { data: clientData } = await supabase
       .from("clients")
       .select("*")
@@ -86,11 +102,19 @@ async function startBot(client) {
       .single();
 
     if (clientData) {
-      await client.sendText(from, `Olá! 👋 Teste do bot ativado para ${clientData.name}.`);
+      // Salva número do cliente associado ao código
+      await supabase.from("clients")
+        .update({ phone: from, active_number: "teste" })
+        .eq("id", clientData.id);
+
+      await client.sendText(
+        from,
+        `Código validado! Agora o bot do seu negócio está pronto para testar.\nSeu link da dashboard: https://<seu-app-render>.onrender.com/dashboard/${message.body}`
+      );
       return;
     }
 
-    // Se não for código, verifica se já temos cliente associado ao número
+    // --- Verifica se número já está cadastrado ---
     let { data: registeredClient } = await supabase
       .from("clients")
       .select("*")
@@ -98,38 +122,49 @@ async function startBot(client) {
       .single();
 
     if (!registeredClient) {
-      // Cria cliente teste automaticamente
+      // Cria cliente de teste automático com código gerado
       const code = generateTestCode();
       const { data: newClient } = await supabase
         .from("clients")
         .insert([
-          { phone: from, name: "Cliente de Teste", business_type: "Restaurante", language: "pt", test_code: code }
+          {
+            phone: from,
+            name: "Cliente de Teste",
+            business_type: "Restaurante",
+            language: "pt",
+            test_code: code,
+            active_number: "teste"
+          }
         ])
         .select()
         .single();
 
-      await client.sendText(from, `Bem-vindo ao teste do bot! Seu código de 6 dígitos é: ${code}`);
+      await client.sendText(
+        from,
+        `Bem-vindo ao teste do bot! Seu código de 6 dígitos é: ${code}\nUse-o para validar o seu teste e acessar sua dashboard: https://<seu-app-render>.onrender.com/dashboard/${code}`
+      );
       return;
     }
 
-    // Criar prompt e chamar IA
+    // --- Cria prompt e envia para IA ---
     const prompt = buildPrompt(registeredClient, message.body);
     const aiResponse = await askGroq(prompt);
 
-    // Guardar mensagens no Supabase
+    // --- Guarda mensagens ---
     await supabase.from("messages").insert([
       { client_id: registeredClient.id, sender: "client", content: message.body },
       { client_id: registeredClient.id, sender: "bot", content: aiResponse }
     ]);
 
-    // Enviar resposta
+    // --- Envia resposta ---
     await client.sendText(from, aiResponse);
   });
 }
 
-// Rota para dashboard básica (teste)
+// --- Rota dashboard do cliente ---
 app.get("/dashboard/:code", async (req, res) => {
   const { code } = req.params;
+
   const { data: clientData } = await supabase
     .from("clients")
     .select("*")
@@ -147,11 +182,7 @@ app.get("/dashboard/:code", async (req, res) => {
   res.json({ client: clientData, messages });
 });
 
-// Rota teste simples
-app.get("/", (req, res) => {
-  res.send("Servidor ativo 🚀");
-});
+// --- Rota teste simples ---
+app.get("/", (req, res) => res.send("Servidor ativo 🚀"));
 
-app.listen(PORT, () => {
-  console.log(`Servidor rodando na porta ${PORT}`);
-});
+app.listen(PORT, () => console.log(`Servidor rodando na porta ${PORT}`));
