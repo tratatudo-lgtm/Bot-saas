@@ -7,16 +7,24 @@ const app = express();
 app.use(express.json());
 const PORT = process.env.PORT || 3000;
 
-// --- Supabase ---
+/* ===========================
+   SUPABASE
+=========================== */
 const supabase = createClient(
   process.env.SUPABASE_URL,
   process.env.SUPABASE_KEY
 );
 
-// --- Variável global para link de sessão ---
+/* ===========================
+   VARIÁVEIS GLOBAIS
+=========================== */
 let sessionLink = "";
+let whatsappClient = null;
 
-// --- Funções ---
+/* ===========================
+   FUNÇÕES AUXILIARES
+=========================== */
+
 function generateTestCode() {
   return Math.floor(100000 + Math.random() * 900000).toString();
 }
@@ -27,11 +35,13 @@ Tu és o assistente virtual da empresa ${clientData.name}.
 Tipo de negócio: ${clientData.business_type}.
 Idioma principal: ${clientData.language || "pt"}.
 
-Objetivo:
-- Adaptar respostas e ações ao tipo de negócio
-- Se for vendas ou marcações, realiza
-- Se for outro tipo de negócio, executa conforme necessidade
-- Responder de forma simpática e profissional
+Instruções:
+- Adapta-te totalmente ao tipo de negócio.
+- Se for restaurante → reservas, pedidos, menu.
+- Se for loja → vendas, produtos, promoções.
+- Se for serviços → agendamentos e suporte.
+- Se for outro tipo → age conforme necessidade.
+- Sê profissional, simpático e direto.
 
 Mensagem do cliente:
 "${userMessage}"
@@ -39,64 +49,131 @@ Mensagem do cliente:
 }
 
 async function askGroq(prompt) {
-  const response = await axios.post(
-    "https://api.groq.com/openai/v1/chat/completions",
-    { model: "llama3-70b-8192", messages: [{ role: "user", content: prompt }] },
-    { headers: { "Authorization": `Bearer ${process.env.GROQ_API_KEY}`, "Content-Type": "application/json" } }
-  );
-  return response.data.choices[0].message.content;
+  try {
+    const response = await axios.post(
+      "https://api.groq.com/openai/v1/chat/completions",
+      {
+        model: "llama3-70b-8192",
+        messages: [{ role: "user", content: prompt }]
+      },
+      {
+        headers: {
+          Authorization: `Bearer ${process.env.GROQ_API_KEY}`,
+          "Content-Type": "application/json"
+        }
+      }
+    );
+
+    return response.data.choices[0].message.content;
+  } catch (err) {
+    console.error("Erro Groq:", err.message);
+    return "Erro ao processar resposta.";
+  }
 }
 
-// --- Iniciar WPPConnect headless ---
+/* ===========================
+   INICIAR WPPCONNECT
+=========================== */
+
 wppconnect.create({
   session: "bot-session",
   headless: true,
-  useChrome: false,       // não precisa de Chrome completo
-  authStrategy: "LOCAL",  // salva sessão local
+  useChrome: true,
+  puppeteerOptions: {
+    args: [
+      "--no-sandbox",
+      "--disable-setuid-sandbox",
+      "--disable-dev-shm-usage",
+      "--disable-gpu"
+    ]
+  },
+  authStrategy: "LOCAL",
   catchQR: (qrCode, asciiQR) => {
-    console.log("📷 QR gerado (ASCII):\n", asciiQR);
+    console.log("QR Code gerado:\n", asciiQR);
   },
   catchLogin: (link) => {
     sessionLink = link;
-    console.log("🔗 Link de login gerado:", link);
+    console.log("🔗 Link de login:", link);
   },
-  onStateChange: (state) => console.log("Estado da sessão:", state)
+  onStateChange: (state) => {
+    console.log("Estado da sessão:", state);
+  }
 })
-.then(client => startBot(client))
-.catch(err => console.error("Erro ao iniciar bot:", err));
+.then(client => {
+  whatsappClient = client;
+  startBot(client);
+})
+.catch(err => {
+  console.error("Erro ao iniciar bot:", err);
+});
 
-// --- Função principal ---
+/* ===========================
+   LÓGICA DO BOT
+=========================== */
+
 async function startBot(client) {
   console.log("🤖 Bot iniciado");
 
   client.onMessage(async (message) => {
     if (!message.body) return;
+
     const from = message.from;
 
-    // --- Código de teste ---
-    let { data: clientData } = await supabase.from("clients").select("*").eq("test_code", message.body).single();
+    // Verifica código de teste
+    let { data: clientData } = await supabase
+      .from("clients")
+      .select("*")
+      .eq("test_code", message.body)
+      .single();
 
     if (clientData) {
-      await supabase.from("clients").update({ phone: from, active_number: "teste" }).eq("id", clientData.id);
-      await client.sendText(from, `Código validado! Dashboard: https://<seu-app-render>.onrender.com/dashboard/${message.body}`);
+      await supabase
+        .from("clients")
+        .update({ phone: from, active_number: "teste" })
+        .eq("id", clientData.id);
+
+      await client.sendText(
+        from,
+        `Código validado! Dashboard: https://SEU-APP.onrender.com/dashboard/${message.body}`
+      );
       return;
     }
 
-    // --- Cliente novo ---
-    let { data: registeredClient } = await supabase.from("clients").select("*").eq("phone", from).single();
+    // Verifica cliente existente
+    let { data: registeredClient } = await supabase
+      .from("clients")
+      .select("*")
+      .eq("phone", from)
+      .single();
 
+    // Novo cliente
     if (!registeredClient) {
       const code = generateTestCode();
-      const { data: newClient } = await supabase.from("clients")
-        .insert([{ phone: from, name: "Cliente de Teste", business_type: "Restaurante", language: "pt", test_code: code, active_number: "teste" }])
+
+      const { data: newClient } = await supabase
+        .from("clients")
+        .insert([
+          {
+            phone: from,
+            name: "Cliente de Teste",
+            business_type: "Restaurante",
+            language: "pt",
+            test_code: code,
+            active_number: "teste"
+          }
+        ])
         .select()
         .single();
 
-      await client.sendText(from, `Bem-vindo! Código: ${code}\nDashboard: https://<seu-app-render>.onrender.com/dashboard/${code}`);
+      await client.sendText(
+        from,
+        `Bem-vindo!\nCódigo: ${code}\nDashboard: https://SEU-APP.onrender.com/dashboard/${code}`
+      );
+
       return;
     }
 
-    // --- IA adaptativa ---
+    // IA
     const prompt = buildPrompt(registeredClient, message.body);
     const aiResponse = await askGroq(prompt);
 
@@ -109,23 +186,49 @@ async function startBot(client) {
   });
 }
 
-// --- Dashboard ---
+/* ===========================
+   ROTAS
+=========================== */
+
+// Teste
+app.get("/", (req, res) => {
+  res.send("Servidor ativo 🚀");
+});
+
+// Link de sessão
+app.get("/session", (req, res) => {
+  if (!sessionLink) {
+    return res.send("Sessão ainda não gerada. Verifica os logs.");
+  }
+
+  res.send(`
+    <h2>🔗 Link para registar número teste</h2>
+    <p>Copia este link:</p>
+    <pre>${sessionLink}</pre>
+  `);
+});
+
+// Dashboard JSON
 app.get("/dashboard/:code", async (req, res) => {
   const { code } = req.params;
-  const { data: clientData } = await supabase.from("clients").select("*").eq("test_code", code).single();
+
+  const { data: clientData } = await supabase
+    .from("clients")
+    .select("*")
+    .eq("test_code", code)
+    .single();
+
   if (!clientData) return res.status(404).send("Código inválido");
 
-  const { data: messages } = await supabase.from("messages").select("*").eq("client_id", clientData.id).order("created_at", { ascending: true });
+  const { data: messages } = await supabase
+    .from("messages")
+    .select("*")
+    .eq("client_id", clientData.id)
+    .order("created_at", { ascending: true });
+
   res.json({ client: clientData, messages });
 });
 
-// --- Link de sessão ---
-app.get("/session", (req, res) => {
-  if (!sessionLink) return res.send("Sessão ainda não gerada.");
-  res.send(`<h2>🔗 Link de login / número teste</h2><pre>${sessionLink}</pre>`);
+app.listen(PORT, () => {
+  console.log(`Servidor rodando na porta ${PORT}`);
 });
-
-// --- Teste ---
-app.get("/", (req, res) => res.send("Servidor ativo 🚀"));
-
-app.listen(PORT, () => console.log(`Servidor rodando na porta ${PORT}`));
