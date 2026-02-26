@@ -1,0 +1,41 @@
+# fly.toml - configuração para Fly.io
+
+app = "bot-saas"   # muda para o nome da tua app no Fly.io
+
+# Especifica que vamos usar a imagem Docker do diretório atual
+[build]
+  image = "."
+
+# Configuração de rede e porta
+[env]
+  PORT = "3000"
+  SUPABASE_URL = "https://<sua-supabase>.supabase.co"
+  SUPABASE_KEY = "<SUA_SUPABASE_KEY>"
+  GROQ_API_KEY = "<SUA_GROQ_API_KEY>"
+
+# Para que o Chromium funcione corretamente
+CHROMIUM_PATH = "/usr/bin/chromium"
+
+# Volumes persistentes (opcional, para guardar sessões WPPConnect)
+[mounts]
+  source = "wpp-data"
+  destination = "/usr/src/app/session"
+
+# Definição do serviço HTTP
+[[services]]
+  internal_port = 3000
+  protocol = "tcp"
+
+  [[services.ports]]
+    port = 80   # porta externa HTTP
+    handlers = ["http"]
+
+  [[services.ports]]
+    port = 443  # porta HTTPS
+    handlers = ["tls", "http"]
+
+  [[services.tcp_checks]]
+    interval = 10000
+    timeout = 2000
+    grace_period = "5s"
+    restart_limit = 6
