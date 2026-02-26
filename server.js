@@ -1,10 +1,11 @@
-// server.js
 import express from "express";
 import wppconnect from "@wppconnect-team/wppconnect";
 import { createClient } from "@supabase/supabase-js";
 import axios from "axios";
+import dotenv from "dotenv";
 
-// --- Iniciar Express ---
+dotenv.config();
+
 const app = express();
 app.use(express.json());
 const PORT = process.env.PORT || 3000;
@@ -18,12 +19,12 @@ const supabase = createClient(
 // --- Variável global para link de sessão ---
 let sessionLink = "";
 
-// --- Função para gerar código de teste ---
+// --- Código de teste ---
 function generateTestCode() {
   return Math.floor(100000 + Math.random() * 900000).toString();
 }
 
-// --- Função para criar prompt IA Groq ---
+// --- Criar prompt para IA ---
 function buildPrompt(clientData, userMessage) {
   return `
 Tu és o assistente virtual da empresa ${clientData.name}.
@@ -58,27 +59,25 @@ async function askGroq(prompt) {
   return response.data.choices[0].message.content;
 }
 
-// --- Iniciar WPPConnect SEM Puppeteer/Chrome ---
+// --- WPPConnect sem Chrome ---
 wppconnect.create({
   session: "bot-session",
   headless: true,
-  useChrome: false,          // ❌ NUNCA usa Chrome
-  authStrategy: "LOCAL",     // salva sessão local
-  catchQR: () => {},         // ignorar QR no Render
-  catchLogin: (link) => {    // ✅ link de login gerado
+  useChrome: false,
+  authStrategy: "LOCAL",
+  catchQR: () => {},
+  catchLogin: (link) => {
     sessionLink = link;
-    console.log("🔗 Link de login gerado:", link);
+    console.log("🔗 Link de login:", link);
   },
-  onStateChange: (state) => {
-    console.log("Estado da sessão:", state);
-  }
+  onStateChange: (state) => console.log("Estado da sessão:", state)
 })
 .then(client => startBot(client))
 .catch(err => console.error("Erro ao iniciar bot:", err));
 
 // --- Função principal do bot ---
 async function startBot(client) {
-  console.log("🤖 Bot iniciado e pronto para receber mensagens");
+  console.log("🤖 Bot iniciado no número de teste");
 
   client.onMessage(async (message) => {
     if (!message.body) return;
@@ -148,7 +147,7 @@ async function startBot(client) {
   });
 }
 
-// --- Rota dashboard do cliente ---
+// --- Dashboard ---
 app.get("/dashboard/:code", async (req, res) => {
   const { code } = req.params;
   const { data: clientData } = await supabase
@@ -171,5 +170,4 @@ app.get("/dashboard/:code", async (req, res) => {
 // --- Rota teste ---
 app.get("/", (req, res) => res.send("Servidor ativo 🚀"));
 
-// --- Iniciar servidor ---
 app.listen(PORT, () => console.log(`Servidor rodando na porta ${PORT}`));
