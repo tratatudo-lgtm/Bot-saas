@@ -5,54 +5,10 @@ const app = express();
 const PORT = process.env.PORT || 3000;
 
 let whatsappClient = null;
-let currentQR = null;
 
-/* =====================================
-   INICIAR WPPCONNECT
-===================================== */
-
-async function startWPP() {
-  try {
-    const client = await wppconnect.create({
-      session: "bot-session",
-      headless: true,
-      useChrome: true,
-      autoClose: 0,
-      waitForLogin: true,
-      puppeteerOptions: {
-        args: [
-          "--no-sandbox",
-          "--disable-setuid-sandbox",
-          "--disable-dev-shm-usage",
-          "--disable-gpu"
-        ]
-      }
-    });
-
-    whatsappClient = client;
-
-    console.log("✅ Bot iniciado");
-
-    client.onStateChange((state) => {
-      console.log("📡 Estado da sessão:", state);
-    });
-
-    client.onStreamChange((state) => {
-      console.log("🌐 Estado da conexão:", state);
-    });
-
-    client.onMessage((message) => {
-      console.log("📩 Mensagem recebida:", message.body);
-    });
-
-  } catch (error) {
-    console.error("❌ Erro ao iniciar WPP:", error);
-  }
-}
-
-/* =====================================
-   ROTAS
-===================================== */
+/* ================================
+   START EXPRESS PRIMEIRO
+================================ */
 
 app.get("/", (req, res) => {
   res.send("Servidor ativo 🚀");
@@ -86,5 +42,46 @@ app.get("/qr", async (req, res) => {
 
 app.listen(PORT, () => {
   console.log(`🚀 Servidor rodando na porta ${PORT}`);
-  startWPP();
 });
+
+/* ================================
+   INICIAR WPPCONNECT SEM BLOQUEAR
+================================ */
+
+setTimeout(() => {
+  console.log("🟡 A iniciar WPPConnect...");
+
+  wppconnect.create({
+    session: "bot-session",
+    headless: true,
+    useChrome: true,
+    autoClose: 0,
+    waitForLogin: true,
+    puppeteerOptions: {
+      args: [
+        "--no-sandbox",
+        "--disable-setuid-sandbox",
+        "--disable-dev-shm-usage",
+        "--disable-gpu"
+      ]
+    }
+  })
+  .then((client) => {
+    whatsappClient = client;
+
+    console.log("✅ WPPConnect iniciado com sucesso");
+
+    client.onStateChange((state) => {
+      console.log("📡 Estado da sessão:", state);
+    });
+
+    client.onStreamChange((state) => {
+      console.log("🌐 Estado da conexão:", state);
+    });
+
+  })
+  .catch((err) => {
+    console.error("❌ ERRO AO INICIAR WPP:", err);
+  });
+
+}, 5000); // espera 5 segundos antes de iniciar
