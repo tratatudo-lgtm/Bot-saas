@@ -1,80 +1,15 @@
 import express from "express";
 import wppconnect from "@wppconnect-team/wppconnect";
-import { createClient } from "@supabase/supabase-js";
-import axios from "axios";
 
-/* ================================
-   CONFIG BASE
-================================ */
 const app = express();
-app.use(express.json());
 const PORT = process.env.PORT || 3000;
 
-/* ================================
-   SUPABASE
-================================ */
-const supabase = createClient(
-  process.env.SUPABASE_URL,
-  process.env.SUPABASE_KEY
-);
-
-/* ================================
-   VARIÁVEIS GLOBAIS
-================================ */
-let sessionLink = "";
 let whatsappClient = null;
+let currentQR = null;
 
-/* ================================
-   FUNÇÕES AUXILIARES
-================================ */
-
-function generateTestCode() {
-  return Math.floor(100000 + Math.random() * 900000).toString();
-}
-
-function buildPrompt(clientData, userMessage) {
-  return `
-Tu és o assistente virtual da empresa ${clientData.name}.
-Tipo de negócio: ${clientData.business_type}.
-Idioma: ${clientData.language || "pt"}.
-
-Adapta-te completamente ao tipo de negócio:
-- Restaurante → reservas, pedidos, menu
-- Loja → vendas, produtos, promoções
-- Serviços → agendamentos e suporte
-- Outro → responde conforme necessário
-
-Mensagem do cliente:
-"${userMessage}"
-`;
-}
-
-async function askGroq(prompt) {
-  try {
-    const response = await axios.post(
-      "https://api.groq.com/openai/v1/chat/completions",
-      {
-        model: "llama3-70b-8192",
-        messages: [{ role: "user", content: prompt }]
-      },
-      {
-        headers: {
-          Authorization: `Bearer ${process.env.GROQ_API_KEY}`,
-          "Content-Type": "application/json"
-        }
-      }
-    );
-
-    return response.data.choices[0].message.content;
-  } catch (err) {
-    console.error("Erro Groq:", err.message);
-    return "Erro ao gerar resposta.";
-  }
-}
-
-/* ================================
+/* =====================================
    INICIAR WPPCONNECT
-================================ */
+===================================== */
 
 async function startWPP() {
   try {
@@ -82,7 +17,8 @@ async function startWPP() {
       session: "bot-session",
       headless: true,
       useChrome: true,
-      autoClose: 0, // 🔥 não fecha sozinho
+      autoClose: 0,
+      waitForLogin: true,
       puppeteerOptions: {
         args: [
           "--no-sandbox",
@@ -90,157 +26,65 @@ async function startWPP() {
           "--disable-dev-shm-usage",
           "--disable-gpu"
         ]
-      },
-      authStrategy: "LOCAL",
-      catchQR: (qrCode, asciiQR) => {
-        console.log("=================================");
-        console.log("📷 QR CODE (escaneia no WhatsApp):");
-        console.log(asciiQR);
-        console.log("=================================");
-      },
-      catchLogin: (link) => {
-        sessionLink = link;
-        console.log("🔗 LINK DE LOGIN:");
-        console.log(link);
-      },
-      onStateChange: (state) => {
-        console.log("Estado da sessão:", state);
       }
     });
 
     whatsappClient = client;
-    console.log("✅ Bot iniciado com sucesso");
-    startBot(client);
 
-  } catch (err) {
-    console.error("Erro ao iniciar bot:", err);
+    console.log("✅ Bot iniciado");
+
+    client.onStateChange((state) => {
+      console.log("📡 Estado da sessão:", state);
+    });
+
+    client.onStreamChange((state) => {
+      console.log("🌐 Estado da conexão:", state);
+    });
+
+    client.onMessage((message) => {
+      console.log("📩 Mensagem recebida:", message.body);
+    });
+
+  } catch (error) {
+    console.error("❌ Erro ao iniciar WPP:", error);
   }
 }
 
-/* ================================
-   LÓGICA DO BOT
-================================ */
-
-function startBot(client) {
-  client.onMessage(async (message) => {
-    if (!message.body) return;
-
-    const from = message.from;
-
-    try {
-      // Verifica código de teste
-      let { data: clientData } = await supabase
-        .from("clients")
-        .select("*")
-        .eq("test_code", message.body)
-        .single();
-
-      if (clientData) {
-        await supabase
-          .from("clients")
-          .update({ phone: from, active_number: "teste" })
-          .eq("id", clientData.id);
-
-        await client.sendText(
-          from,
-          `Código validado!\nDashboard: https://SEU-APP.onrender.com/dashboard/${message.body}`
-        );
-        return;
-      }
-
-      // Verifica cliente existente
-      let { data: registeredClient } = await supabase
-        .from("clients")
-        .select("*")
-        .eq("phone", from)
-        .single();
-
-      // Novo cliente
-      if (!registeredClient) {
-        const code = generateTestCode();
-
-        const { data: newClient } = await supabase
-          .from("clients")
-          .insert([{
-            phone: from,
-            name: "Cliente de Teste",
-            business_type: "Restaurante",
-            language: "pt",
-            test_code: code,
-            active_number: "teste"
-          }])
-          .select()
-          .single();
-
-        await client.sendText(
-          from,
-          `Bem-vindo!\nCódigo: ${code}\nDashboard: https://SEU-APP.onrender.com/dashboard/${code}`
-        );
-        return;
-      }
-
-      // IA
-      const prompt = buildPrompt(registeredClient, message.body);
-      const aiResponse = await askGroq(prompt);
-
-      await supabase.from("messages").insert([
-        { client_id: registeredClient.id, sender: "client", content: message.body },
-        { client_id: registeredClient.id, sender: "bot", content: aiResponse }
-      ]);
-
-      await client.sendText(from, aiResponse);
-
-    } catch (err) {
-      console.error("Erro processamento mensagem:", err);
-    }
-  });
-}
-
-/* ================================
+/* =====================================
    ROTAS
-================================ */
+===================================== */
 
 app.get("/", (req, res) => {
   res.send("Servidor ativo 🚀");
 });
 
-app.get("/session", (req, res) => {
-  if (!sessionLink) {
-    return res.send("Sessão ainda não gerada. Verifica os logs.");
+app.get("/status", async (req, res) => {
+  if (!whatsappClient) {
+    return res.send("Cliente ainda não inicializado");
   }
 
-  res.send(`
-    <h2>🔗 Link para registar número teste</h2>
-    <pre>${sessionLink}</pre>
-  `);
+  try {
+    const state = await whatsappClient.getConnectionState();
+    res.send(`Estado atual: ${state}`);
+  } catch (err) {
+    res.send("Erro ao obter estado");
+  }
 });
 
-app.get("/dashboard/:code", async (req, res) => {
-  const { code } = req.params;
+app.get("/qr", async (req, res) => {
+  if (!whatsappClient) {
+    return res.send("Cliente ainda não iniciado");
+  }
 
-  const { data: clientData } = await supabase
-    .from("clients")
-    .select("*")
-    .eq("test_code", code)
-    .single();
-
-  if (!clientData) return res.status(404).send("Código inválido");
-
-  const { data: messages } = await supabase
-    .from("messages")
-    .select("*")
-    .eq("client_id", clientData.id)
-    .order("created_at", { ascending: true });
-
-  res.json({ client: clientData, messages });
+  try {
+    const qr = await whatsappClient.getQrCode();
+    res.send(`<pre>${qr}</pre>`);
+  } catch (err) {
+    res.send("QR ainda não disponível");
+  }
 });
-
-/* ================================
-   START
-================================ */
 
 app.listen(PORT, () => {
-  console.log(`Servidor rodando na porta ${PORT}`);
+  console.log(`🚀 Servidor rodando na porta ${PORT}`);
+  startWPP();
 });
-
-startWPP();
