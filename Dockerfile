@@ -1,40 +1,20 @@
-# --- Dockerfile para WPPConnect sem Chrome ---
-# Usa Node.js LTS
-FROM node:22
+# Node LTS
+FROM node:22-bullseye
 
-# Define o diretório de trabalho
+# Diretório de trabalho
 WORKDIR /usr/src/app
 
-# Copia apenas package.json e package-lock.json
-COPY package*.json ./
-
-# Instala dependências (sem devDependencies)
-RUN npm install --omit=dev
-
-# Copia todo o resto do projeto
-COPY . .
-
-# Expõe a porta do Express
-EXPOSE 3000
-
-# Comando para iniciar o servidor
-CMD ["node", "server.js"]# Usa Node.js LTS
-FROM node:22
-
-# Define o diretório de trabalho
-WORKDIR /usr/src/app
-
-# Copia apenas os ficheiros de dependências primeiro
+# Copia package.json e package-lock.json
 COPY package*.json ./
 
 # Instala dependências
 RUN npm install
 
-# Copia todo o resto do projeto
+# Copia o restante do projeto
 COPY . .
 
-# Expõe a porta que o teu app usa
+# Expõe a porta do app
 EXPOSE 3000
 
-# Comando para iniciar o servidor
+# Comando para iniciar
 CMD ["node", "server.js"]
