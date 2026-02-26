@@ -7,9 +7,9 @@ const PORT = process.env.PORT || 3000;
 let whatsappClient = null;
 let loginLink = null;
 
-/* =====================================
+/* ==============================
    ROTAS
-===================================== */
+============================== */
 
 app.get("/", (req, res) => {
   res.send("Servidor ativo 🚀");
@@ -34,22 +34,22 @@ app.get("/session", (req, res) => {
   }
 
   res.send(`
-    <h2>🔗 Link para registar número</h2>
+    <h2>🔗 Link para ligar WhatsApp</h2>
     <a href="${loginLink}" target="_blank">${loginLink}</a>
   `);
 });
 
-/* =====================================
-   INICIAR SERVIDOR
-===================================== */
+/* ==============================
+   START SERVIDOR
+============================== */
 
 app.listen(PORT, () => {
   console.log(`🚀 Servidor rodando na porta ${PORT}`);
 });
 
-/* =====================================
-   INICIAR WPPCONNECT
-===================================== */
+/* ==============================
+   INICIAR WPP
+============================== */
 
 setTimeout(() => {
   console.log("🟡 A iniciar WPPConnect...");
@@ -57,7 +57,7 @@ setTimeout(() => {
   wppconnect.create({
     session: "bot-session",
     headless: true,
-    useChrome: true,
+    useChrome: false, // usa chromium do sistema
     autoClose: 0,
     waitForLogin: true,
     puppeteerOptions: {
@@ -68,11 +68,14 @@ setTimeout(() => {
         "--disable-gpu"
       ]
     },
+
+    // 🔥 ISTO GERA O LINK EM VEZ DO QR
     catchLinkCode: (link) => {
-      console.log("🔗 LINK DE LOGIN GERADO:");
+      console.log("🔗 LINK GERADO:");
       console.log(link);
       loginLink = link;
     },
+
     onStateChange: (state) => {
       console.log("📡 Estado da sessão:", state);
     }
