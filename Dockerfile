@@ -1,19 +1,19 @@
-# Node LTS
-FROM node:22-bullseye
+# Usa Node.js LTS
+FROM node:22
 
 # Diretório de trabalho
 WORKDIR /usr/src/app
 
-# Copia package.json e package-lock.json
+# Copia apenas ficheiros de dependências
 COPY package*.json ./
 
 # Instala dependências
-RUN npm install
+RUN npm install --legacy-peer-deps
 
-# Copia o restante do projeto
+# Copia todo o resto do projeto
 COPY . .
 
-# Expõe a porta do app
+# Expõe a porta usada pelo server
 EXPOSE 3000
 
 # Comando para iniciar
