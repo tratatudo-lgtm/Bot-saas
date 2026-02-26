@@ -3,27 +3,30 @@ import wppconnect from "@wppconnect-team/wppconnect";
 import { createClient } from "@supabase/supabase-js";
 import axios from "axios";
 
+/* ================================
+   CONFIG BASE
+================================ */
 const app = express();
 app.use(express.json());
 const PORT = process.env.PORT || 3000;
 
-/* ===========================
+/* ================================
    SUPABASE
-=========================== */
+================================ */
 const supabase = createClient(
   process.env.SUPABASE_URL,
   process.env.SUPABASE_KEY
 );
 
-/* ===========================
+/* ================================
    VARIÁVEIS GLOBAIS
-=========================== */
+================================ */
 let sessionLink = "";
 let whatsappClient = null;
 
-/* ===========================
+/* ================================
    FUNÇÕES AUXILIARES
-=========================== */
+================================ */
 
 function generateTestCode() {
   return Math.floor(100000 + Math.random() * 900000).toString();
@@ -33,15 +36,13 @@ function buildPrompt(clientData, userMessage) {
   return `
 Tu és o assistente virtual da empresa ${clientData.name}.
 Tipo de negócio: ${clientData.business_type}.
-Idioma principal: ${clientData.language || "pt"}.
+Idioma: ${clientData.language || "pt"}.
 
-Instruções:
-- Adapta-te totalmente ao tipo de negócio.
-- Se for restaurante → reservas, pedidos, menu.
-- Se for loja → vendas, produtos, promoções.
-- Se for serviços → agendamentos e suporte.
-- Se for outro tipo → age conforme necessidade.
-- Sê profissional, simpático e direto.
+Adapta-te completamente ao tipo de negócio:
+- Restaurante → reservas, pedidos, menu
+- Loja → vendas, produtos, promoções
+- Serviços → agendamentos e suporte
+- Outro → responde conforme necessário
 
 Mensagem do cliente:
 "${userMessage}"
@@ -67,135 +68,142 @@ async function askGroq(prompt) {
     return response.data.choices[0].message.content;
   } catch (err) {
     console.error("Erro Groq:", err.message);
-    return "Erro ao processar resposta.";
+    return "Erro ao gerar resposta.";
   }
 }
 
-/* ===========================
+/* ================================
    INICIAR WPPCONNECT
-=========================== */
+================================ */
 
-wppconnect.create({
-  session: "bot-session",
-  headless: true,
-  useChrome: true,
-  puppeteerOptions: {
-    args: [
-      "--no-sandbox",
-      "--disable-setuid-sandbox",
-      "--disable-dev-shm-usage",
-      "--disable-gpu"
-    ]
-  },
-  authStrategy: "LOCAL",
-  catchQR: (qrCode, asciiQR) => {
-    console.log("QR Code gerado:\n", asciiQR);
-  },
-  catchLogin: (link) => {
-    sessionLink = link;
-    console.log("🔗 Link de login:", link);
-  },
-  onStateChange: (state) => {
-    console.log("Estado da sessão:", state);
+async function startWPP() {
+  try {
+    const client = await wppconnect.create({
+      session: "bot-session",
+      headless: true,
+      useChrome: true,
+      autoClose: 0, // 🔥 não fecha sozinho
+      puppeteerOptions: {
+        args: [
+          "--no-sandbox",
+          "--disable-setuid-sandbox",
+          "--disable-dev-shm-usage",
+          "--disable-gpu"
+        ]
+      },
+      authStrategy: "LOCAL",
+      catchQR: (qrCode, asciiQR) => {
+        console.log("=================================");
+        console.log("📷 QR CODE (escaneia no WhatsApp):");
+        console.log(asciiQR);
+        console.log("=================================");
+      },
+      catchLogin: (link) => {
+        sessionLink = link;
+        console.log("🔗 LINK DE LOGIN:");
+        console.log(link);
+      },
+      onStateChange: (state) => {
+        console.log("Estado da sessão:", state);
+      }
+    });
+
+    whatsappClient = client;
+    console.log("✅ Bot iniciado com sucesso");
+    startBot(client);
+
+  } catch (err) {
+    console.error("Erro ao iniciar bot:", err);
   }
-})
-.then(client => {
-  whatsappClient = client;
-  startBot(client);
-})
-.catch(err => {
-  console.error("Erro ao iniciar bot:", err);
-});
+}
 
-/* ===========================
+/* ================================
    LÓGICA DO BOT
-=========================== */
+================================ */
 
-async function startBot(client) {
-  console.log("🤖 Bot iniciado");
-
+function startBot(client) {
   client.onMessage(async (message) => {
     if (!message.body) return;
 
     const from = message.from;
 
-    // Verifica código de teste
-    let { data: clientData } = await supabase
-      .from("clients")
-      .select("*")
-      .eq("test_code", message.body)
-      .single();
-
-    if (clientData) {
-      await supabase
+    try {
+      // Verifica código de teste
+      let { data: clientData } = await supabase
         .from("clients")
-        .update({ phone: from, active_number: "teste" })
-        .eq("id", clientData.id);
+        .select("*")
+        .eq("test_code", message.body)
+        .single();
 
-      await client.sendText(
-        from,
-        `Código validado! Dashboard: https://SEU-APP.onrender.com/dashboard/${message.body}`
-      );
-      return;
-    }
+      if (clientData) {
+        await supabase
+          .from("clients")
+          .update({ phone: from, active_number: "teste" })
+          .eq("id", clientData.id);
 
-    // Verifica cliente existente
-    let { data: registeredClient } = await supabase
-      .from("clients")
-      .select("*")
-      .eq("phone", from)
-      .single();
+        await client.sendText(
+          from,
+          `Código validado!\nDashboard: https://SEU-APP.onrender.com/dashboard/${message.body}`
+        );
+        return;
+      }
 
-    // Novo cliente
-    if (!registeredClient) {
-      const code = generateTestCode();
-
-      const { data: newClient } = await supabase
+      // Verifica cliente existente
+      let { data: registeredClient } = await supabase
         .from("clients")
-        .insert([
-          {
+        .select("*")
+        .eq("phone", from)
+        .single();
+
+      // Novo cliente
+      if (!registeredClient) {
+        const code = generateTestCode();
+
+        const { data: newClient } = await supabase
+          .from("clients")
+          .insert([{
             phone: from,
             name: "Cliente de Teste",
             business_type: "Restaurante",
             language: "pt",
             test_code: code,
             active_number: "teste"
-          }
-        ])
-        .select()
-        .single();
+          }])
+          .select()
+          .single();
 
-      await client.sendText(
-        from,
-        `Bem-vindo!\nCódigo: ${code}\nDashboard: https://SEU-APP.onrender.com/dashboard/${code}`
-      );
+        await client.sendText(
+          from,
+          `Bem-vindo!\nCódigo: ${code}\nDashboard: https://SEU-APP.onrender.com/dashboard/${code}`
+        );
+        return;
+      }
 
-      return;
+      // IA
+      const prompt = buildPrompt(registeredClient, message.body);
+      const aiResponse = await askGroq(prompt);
+
+      await supabase.from("messages").insert([
+        { client_id: registeredClient.id, sender: "client", content: message.body },
+        { client_id: registeredClient.id, sender: "bot", content: aiResponse }
+      ]);
+
+      await client.sendText(from, aiResponse);
+
+    } catch (err) {
+      console.error("Erro processamento mensagem:", err);
     }
-
-    // IA
-    const prompt = buildPrompt(registeredClient, message.body);
-    const aiResponse = await askGroq(prompt);
-
-    await supabase.from("messages").insert([
-      { client_id: registeredClient.id, sender: "client", content: message.body },
-      { client_id: registeredClient.id, sender: "bot", content: aiResponse }
-    ]);
-
-    await client.sendText(from, aiResponse);
   });
 }
 
-/* ===========================
+/* ================================
    ROTAS
-=========================== */
+================================ */
 
-// Teste
 app.get("/", (req, res) => {
   res.send("Servidor ativo 🚀");
 });
 
-// Link de sessão
 app.get("/session", (req, res) => {
   if (!sessionLink) {
     return res.send("Sessão ainda não gerada. Verifica os logs.");
@@ -203,12 +211,10 @@ app.get("/session", (req, res) => {
 
   res.send(`
     <h2>🔗 Link para registar número teste</h2>
-    <p>Copia este link:</p>
     <pre>${sessionLink}</pre>
   `);
 });
 
-// Dashboard JSON
 app.get("/dashboard/:code", async (req, res) => {
   const { code } = req.params;
 
@@ -229,6 +235,12 @@ app.get("/dashboard/:code", async (req, res) => {
   res.json({ client: clientData, messages });
 });
 
+/* ================================
+   START
+================================ */
+
 app.listen(PORT, () => {
   console.log(`Servidor rodando na porta ${PORT}`);
 });
+
+startWPP();
