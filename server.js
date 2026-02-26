@@ -17,19 +17,17 @@ const supabase = createClient(
   process.env.SUPABASE_KEY
 );
 
-// Variável global do cliente WhatsApp
+// Variável global do cliente WhatsApp e link de sessão
 let whatsappClient = null;
+let sessionLink = "";
 
 // ==============================
 // FUNÇÕES AUXILIARES
 // ==============================
-
-// Gerar código de teste
 function generateTestCode() {
   return Math.floor(100000 + Math.random() * 900000).toString();
 }
 
-// Construir prompt para IA
 function buildPrompt(clientData, userMessage) {
   return `
 Tu és o assistente virtual da empresa ${clientData.name}.
@@ -45,7 +43,6 @@ Mensagem do cliente:
 `;
 }
 
-// Chamada à IA Groq
 async function askGroq(prompt) {
   const response = await axios.post(
     "https://api.groq.com/openai/v1/chat/completions",
@@ -78,10 +75,10 @@ app.get("/status", async (req, res) => {
   }
 });
 
-// Rota para receber link de sessão
+// Rota para link de sessão
 app.get("/session", (req, res) => {
   if (!sessionLink) return res.send("Sessão ainda não gerada. Verifica os logs.");
-  res.send(`<a href="${sessionLink}" target="_blank">Clique aqui para abrir a sessão do WhatsApp</a>`);
+  res.send(`<a href="${sessionLink}" target="_blank">Clique aqui para iniciar a sessão WhatsApp</a>`);
 });
 
 // Dashboard de mensagens do cliente
@@ -105,28 +102,17 @@ app.get("/dashboard/:code", async (req, res) => {
 });
 
 // ==============================
-// INICIAR WPPCONNECT
+// INICIAR WPPCONNECT SEM CHROME
 // ==============================
-let sessionLink = "";
-
 setTimeout(() => {
   console.log("🟡 A iniciar WPPConnect...");
 
   wppconnect.create({
     session: "bot-session",
     headless: true,
-    useChrome: true,
+    useChrome: false,           // ❌ não usa Chrome
+    authStrategy: "LOCAL",
     autoClose: 0,
-    waitForLogin: true,
-    puppeteerOptions: {
-      executablePath: "/usr/bin/chromium",
-      args: [
-        "--no-sandbox",
-        "--disable-setuid-sandbox",
-        "--disable-dev-shm-usage",
-        "--disable-gpu"
-      ]
-    },
     catchLogin: (link) => {
       sessionLink = link;
       console.log("🔗 Link de login gerado:", link);
@@ -137,12 +123,11 @@ setTimeout(() => {
     whatsappClient = client;
     console.log("✅ WPPConnect iniciado com sucesso");
 
-    // Receber mensagens
     client.onMessage(async (message) => {
       if (!message.body) return;
       const from = message.from;
 
-      // Verifica se é código de teste
+      // Código de teste
       let { data: clientData } = await supabase
         .from("clients")
         .select("*")
@@ -161,7 +146,7 @@ setTimeout(() => {
         return;
       }
 
-      // Verifica se cliente já registrado
+      // Cliente já registrado?
       let { data: registeredClient } = await supabase
         .from("clients")
         .select("*")
@@ -170,8 +155,7 @@ setTimeout(() => {
 
       if (!registeredClient) {
         const code = generateTestCode();
-        const { data: newClient } = await supabase
-          .from("clients")
+        await supabase.from("clients")
           .insert([{
             phone: from,
             name: "Cliente de Teste",
@@ -179,9 +163,7 @@ setTimeout(() => {
             language: "pt",
             test_code: code,
             active_number: "teste"
-          }])
-          .select()
-          .single();
+          }]);
 
         await client.sendText(
           from,
