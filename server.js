@@ -5,10 +5,11 @@ const app = express();
 const PORT = process.env.PORT || 3000;
 
 let whatsappClient = null;
+let loginLink = null;
 
-/* ================================
-   START EXPRESS PRIMEIRO
-================================ */
+/* =====================================
+   ROTAS
+===================================== */
 
 app.get("/", (req, res) => {
   res.send("Servidor ativo 🚀");
@@ -27,26 +28,28 @@ app.get("/status", async (req, res) => {
   }
 });
 
-app.get("/qr", async (req, res) => {
-  if (!whatsappClient) {
-    return res.send("Cliente ainda não iniciado");
+app.get("/session", (req, res) => {
+  if (!loginLink) {
+    return res.send("Link ainda não gerado. Aguarda...");
   }
 
-  try {
-    const qr = await whatsappClient.getQrCode();
-    res.send(`<pre>${qr}</pre>`);
-  } catch (err) {
-    res.send("QR ainda não disponível");
-  }
+  res.send(`
+    <h2>🔗 Link para registar número</h2>
+    <a href="${loginLink}" target="_blank">${loginLink}</a>
+  `);
 });
+
+/* =====================================
+   INICIAR SERVIDOR
+===================================== */
 
 app.listen(PORT, () => {
   console.log(`🚀 Servidor rodando na porta ${PORT}`);
 });
 
-/* ================================
-   INICIAR WPPCONNECT SEM BLOQUEAR
-================================ */
+/* =====================================
+   INICIAR WPPCONNECT
+===================================== */
 
 setTimeout(() => {
   console.log("🟡 A iniciar WPPConnect...");
@@ -64,24 +67,22 @@ setTimeout(() => {
         "--disable-dev-shm-usage",
         "--disable-gpu"
       ]
+    },
+    catchLinkCode: (link) => {
+      console.log("🔗 LINK DE LOGIN GERADO:");
+      console.log(link);
+      loginLink = link;
+    },
+    onStateChange: (state) => {
+      console.log("📡 Estado da sessão:", state);
     }
   })
   .then((client) => {
     whatsappClient = client;
-
     console.log("✅ WPPConnect iniciado com sucesso");
-
-    client.onStateChange((state) => {
-      console.log("📡 Estado da sessão:", state);
-    });
-
-    client.onStreamChange((state) => {
-      console.log("🌐 Estado da conexão:", state);
-    });
-
   })
   .catch((err) => {
     console.error("❌ ERRO AO INICIAR WPP:", err);
   });
 
-}, 5000); // espera 5 segundos antes de iniciar
+}, 5000);
