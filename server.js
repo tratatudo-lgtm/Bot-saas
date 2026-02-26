@@ -7,10 +7,6 @@ const PORT = process.env.PORT || 3000;
 let whatsappClient = null;
 let loginLink = null;
 
-/* ==============================
-   ROTAS
-============================== */
-
 app.get("/", (req, res) => {
   res.send("Servidor ativo 🚀");
 });
@@ -23,7 +19,7 @@ app.get("/status", async (req, res) => {
   try {
     const state = await whatsappClient.getConnectionState();
     res.send(`Estado atual: ${state}`);
-  } catch (err) {
+  } catch {
     res.send("Erro ao obter estado");
   }
 });
@@ -33,23 +29,12 @@ app.get("/session", (req, res) => {
     return res.send("Link ainda não gerado. Aguarda...");
   }
 
-  res.send(`
-    <h2>🔗 Link para ligar WhatsApp</h2>
-    <a href="${loginLink}" target="_blank">${loginLink}</a>
-  `);
+  res.send(`<a href="${loginLink}" target="_blank">${loginLink}</a>`);
 });
-
-/* ==============================
-   START SERVIDOR
-============================== */
 
 app.listen(PORT, () => {
   console.log(`🚀 Servidor rodando na porta ${PORT}`);
 });
-
-/* ==============================
-   INICIAR WPP
-============================== */
 
 setTimeout(() => {
   console.log("🟡 A iniciar WPPConnect...");
@@ -57,32 +42,24 @@ setTimeout(() => {
   wppconnect.create({
     session: "bot-session",
     headless: true,
-    useChrome: false, // usa chromium do sistema
     autoClose: 0,
     waitForLogin: true,
+    // 🔥 NÃO usar useChrome
     puppeteerOptions: {
       args: [
         "--no-sandbox",
         "--disable-setuid-sandbox",
-        "--disable-dev-shm-usage",
-        "--disable-gpu"
+        "--disable-dev-shm-usage"
       ]
     },
-
-    // 🔥 ISTO GERA O LINK EM VEZ DO QR
     catchLinkCode: (link) => {
-      console.log("🔗 LINK GERADO:");
-      console.log(link);
+      console.log("🔗 LINK GERADO:", link);
       loginLink = link;
-    },
-
-    onStateChange: (state) => {
-      console.log("📡 Estado da sessão:", state);
     }
   })
   .then((client) => {
     whatsappClient = client;
-    console.log("✅ WPPConnect iniciado com sucesso");
+    console.log("✅ WPP iniciado com sucesso");
   })
   .catch((err) => {
     console.error("❌ ERRO AO INICIAR WPP:", err);
