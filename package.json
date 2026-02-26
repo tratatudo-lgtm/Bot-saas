@@ -1,15 +1,16 @@
 {
   "name": "bot-saas",
   "version": "1.0.0",
+  "description": "Servidor WPPConnect + Supabase + Groq",
+  "main": "server.js",
   "type": "module",
   "scripts": {
     "start": "node server.js"
   },
   "dependencies": {
-    "@wppconnect-team/wppconnect": "^2.0.0",
-    "express": "^4.18.2",
-    "axios": "^1.5.0",
-    "@supabase/supabase-js": "^2.14.0",
-    "dotenv": "^16.3.1"
+    "@wppconnect-team/wppconnect": "1.9.11",
+    "@supabase/supabase-js": "^2.0.0",
+    "axios": "^1.7.0",
+    "express": "^4.18.2"
   }
 }
