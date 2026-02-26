@@ -1,40 +1,113 @@
+// server.js
 import express from "express";
 import wppconnect from "@wppconnect-team/wppconnect";
+import { createClient } from "@supabase/supabase-js";
+import axios from "axios";
 
+// ==============================
+// CONFIGURAÇÕES
+// ==============================
 const app = express();
+app.use(express.json());
 const PORT = process.env.PORT || 3000;
 
-let whatsappClient = null;
-let loginLink = null;
+// Supabase
+const supabase = createClient(
+  process.env.SUPABASE_URL,
+  process.env.SUPABASE_KEY
+);
 
-app.get("/", (req, res) => {
-  res.send("Servidor ativo 🚀");
-});
+// Variável global do cliente WhatsApp
+let whatsappClient = null;
+
+// ==============================
+// FUNÇÕES AUXILIARES
+// ==============================
+
+// Gerar código de teste
+function generateTestCode() {
+  return Math.floor(100000 + Math.random() * 900000).toString();
+}
+
+// Construir prompt para IA
+function buildPrompt(clientData, userMessage) {
+  return `
+Tu és o assistente virtual da empresa ${clientData.name}.
+Tipo de negócio: ${clientData.business_type}.
+Idioma principal: ${clientData.language || "pt"}.
+
+Objetivo:
+- Adaptar-se ao tipo de negócio
+- Fazer vendas, marcações ou outras ações conforme necessário
+
+Mensagem do cliente:
+"${userMessage}"
+`;
+}
+
+// Chamada à IA Groq
+async function askGroq(prompt) {
+  const response = await axios.post(
+    "https://api.groq.com/openai/v1/chat/completions",
+    {
+      model: "llama3-70b-8192",
+      messages: [{ role: "user", content: prompt }]
+    },
+    {
+      headers: {
+        "Authorization": `Bearer ${process.env.GROQ_API_KEY}`,
+        "Content-Type": "application/json"
+      }
+    }
+  );
+  return response.data.choices[0].message.content;
+}
+
+// ==============================
+// ROTAS EXPRESS
+// ==============================
+app.get("/", (req, res) => res.send("Servidor ativo 🚀"));
 
 app.get("/status", async (req, res) => {
-  if (!whatsappClient) {
-    return res.send("Cliente ainda não inicializado");
-  }
-
+  if (!whatsappClient) return res.send("Cliente ainda não inicializado");
   try {
     const state = await whatsappClient.getConnectionState();
     res.send(`Estado atual: ${state}`);
-  } catch {
+  } catch (err) {
     res.send("Erro ao obter estado");
   }
 });
 
+// Rota para receber link de sessão
 app.get("/session", (req, res) => {
-  if (!loginLink) {
-    return res.send("Link ainda não gerado. Aguarda...");
-  }
-
-  res.send(`<a href="${loginLink}" target="_blank">${loginLink}</a>`);
+  if (!sessionLink) return res.send("Sessão ainda não gerada. Verifica os logs.");
+  res.send(`<a href="${sessionLink}" target="_blank">Clique aqui para abrir a sessão do WhatsApp</a>`);
 });
 
-app.listen(PORT, () => {
-  console.log(`🚀 Servidor rodando na porta ${PORT}`);
+// Dashboard de mensagens do cliente
+app.get("/dashboard/:code", async (req, res) => {
+  const { code } = req.params;
+  const { data: clientData } = await supabase
+    .from("clients")
+    .select("*")
+    .eq("test_code", code)
+    .single();
+
+  if (!clientData) return res.status(404).send("Código inválido");
+
+  const { data: messages } = await supabase
+    .from("messages")
+    .select("*")
+    .eq("client_id", clientData.id)
+    .order("created_at", { ascending: true });
+
+  res.json({ client: clientData, messages });
 });
+
+// ==============================
+// INICIAR WPPCONNECT
+// ==============================
+let sessionLink = "";
 
 setTimeout(() => {
   console.log("🟡 A iniciar WPPConnect...");
@@ -42,27 +115,100 @@ setTimeout(() => {
   wppconnect.create({
     session: "bot-session",
     headless: true,
+    useChrome: true,
     autoClose: 0,
     waitForLogin: true,
-    // 🔥 NÃO usar useChrome
     puppeteerOptions: {
+      executablePath: "/usr/bin/chromium",
       args: [
         "--no-sandbox",
         "--disable-setuid-sandbox",
-        "--disable-dev-shm-usage"
+        "--disable-dev-shm-usage",
+        "--disable-gpu"
       ]
     },
-    catchLinkCode: (link) => {
-      console.log("🔗 LINK GERADO:", link);
-      loginLink = link;
-    }
+    catchLogin: (link) => {
+      sessionLink = link;
+      console.log("🔗 Link de login gerado:", link);
+    },
+    onStateChange: (state) => console.log("📡 Estado da sessão:", state)
   })
-  .then((client) => {
+  .then(client => {
     whatsappClient = client;
-    console.log("✅ WPP iniciado com sucesso");
+    console.log("✅ WPPConnect iniciado com sucesso");
+
+    // Receber mensagens
+    client.onMessage(async (message) => {
+      if (!message.body) return;
+      const from = message.from;
+
+      // Verifica se é código de teste
+      let { data: clientData } = await supabase
+        .from("clients")
+        .select("*")
+        .eq("test_code", message.body)
+        .single();
+
+      if (clientData) {
+        await supabase.from("clients")
+          .update({ phone: from, active_number: "teste" })
+          .eq("id", clientData.id);
+
+        await client.sendText(
+          from,
+          `Código validado! Bot pronto para teste.\nLink dashboard: https://<teu-app>.fly.dev/dashboard/${message.body}`
+        );
+        return;
+      }
+
+      // Verifica se cliente já registrado
+      let { data: registeredClient } = await supabase
+        .from("clients")
+        .select("*")
+        .eq("phone", from)
+        .single();
+
+      if (!registeredClient) {
+        const code = generateTestCode();
+        const { data: newClient } = await supabase
+          .from("clients")
+          .insert([{
+            phone: from,
+            name: "Cliente de Teste",
+            business_type: "Restaurante",
+            language: "pt",
+            test_code: code,
+            active_number: "teste"
+          }])
+          .select()
+          .single();
+
+        await client.sendText(
+          from,
+          `Bem-vindo! Código de 6 dígitos: ${code}\nUse-o para validar e acessar sua dashboard: https://<teu-app>.fly.dev/dashboard/${code}`
+        );
+        return;
+      }
+
+      // Chamada IA
+      const prompt = buildPrompt(registeredClient, message.body);
+      const aiResponse = await askGroq(prompt);
+
+      // Guardar mensagens
+      await supabase.from("messages").insert([
+        { client_id: registeredClient.id, sender: "client", content: message.body },
+        { client_id: registeredClient.id, sender: "bot", content: aiResponse }
+      ]);
+
+      await client.sendText(from, aiResponse);
+    });
+
   })
-  .catch((err) => {
-    console.error("❌ ERRO AO INICIAR WPP:", err);
-  });
+  .catch(err => console.error("❌ ERRO AO INICIAR WPP:", err));
 
 }, 5000);
+
+// ==============================
+// INICIAR SERVIDOR
+// ==============================
+app.listen(PORT, () => console.log(`🚀 Servidor rodando na porta ${PORT}`));
